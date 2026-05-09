@@ -1,0 +1,493 @@
+﻿import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken,
+  onAuthStateChanged,
+  signOut 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  query, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
+  deleteDoc,
+  serverTimestamp 
+} from 'firebase/firestore';
+import { 
+  Layout, 
+  Users, 
+  BookOpen, 
+  Wallet, 
+  LogOut, 
+  Plus, 
+  Trash2, 
+  Edit2, 
+  ChevronRight, 
+  CheckCircle,
+  FileText,
+  UserCircle,
+  Calendar,
+  Globe
+} from 'lucide-react';
+
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'jamia-management-system';
+
+// --- Translations ---
+const translations = {
+  ur: {
+    bismillah: "بسم اللہ الرحمن الرحیم",
+    title: "جامعہ نقشبندیہ باروی رضویہ",
+    address: "چک نمبر 109 گ ب بجاجانوالہ جڑانوالہ فیصل آباد",
+    studentLogin: "طالب علم لاگ ان",
+    adminLogin: "ایڈمن لاگ ان",
+    dashboard: "ڈیش بورڈ",
+    students: "طلباء",
+    education: "تعلیمی ریکارڈ",
+    finance: "مالیات",
+    logout: "لاگ آؤٹ",
+    addStudent: "نیا طالب علم",
+    income: "آمدن",
+    expense: "خرچ",
+    footer: "تعاون فرمایا: باروی گرافکس فیصل آباد",
+    name: "نام",
+    fatherName: "والد کا نام",
+    age: "عمر",
+    phone: "فون نمبر",
+    addressLabel: "پتہ",
+    save: "محفوظ کریں",
+    reports: "رپورٹس",
+    sabak: "سبق",
+    sabqi: "سبقی",
+    manzil: "منزل",
+    namaz: "نماز",
+    donor: "عطیہ دہندہ",
+    amount: "رقم",
+    description: "تفصیل",
+    date: "تاریخ",
+    loading: "لوڈنگ ہو رہی ہے..."
+  },
+  en: {
+    bismillah: "Bismillah ir Rahman ir Raheem",
+    title: "Jamia Naqshbandia Barvi Razvia",
+    address: "Chak No 109 GB Bajajanwala, Jaranwala, Faisalabad",
+    studentLogin: "Student Login",
+    adminLogin: "Admin Login",
+    dashboard: "Dashboard",
+    students: "Students",
+    education: "Academic Records",
+    finance: "Finance",
+    logout: "Logout",
+    addStudent: "Add Student",
+    income: "Income",
+    expense: "Expense",
+    footer: "Powered by Barvi Graphics Faisalabad",
+    name: "Name",
+    fatherName: "Father Name",
+    age: "Age",
+    phone: "Phone",
+    addressLabel: "Address",
+    save: "Save",
+    reports: "Reports",
+    sabak: "Sabak",
+    sabqi: "Sabqi",
+    manzil: "Manzil",
+    namaz: "Namaz",
+    donor: "Donor Name",
+    amount: "Amount",
+    description: "Description",
+    date: "Date",
+    loading: "Loading..."
+  }
+};
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [lang, setLang] = useState('ur');
+  const [view, setView] = useState('home'); // home, admin, student, finance
+  const [role, setRole] = useState(null); // 'admin' or 'student'
+  const [students, setStudents] = useState([]);
+  const [transactionsData, setTransactionsData] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [profileModal, setProfileModal] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const t = translations[lang];
+
+  // RULE 3: Auth Initialization FIRST
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Authentication failed:", error);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // RULE 2 & 3: Data Sync after user is authenticated
+  useEffect(() => {
+    if (!user) return;
+
+    // Use Rule 1 Paths: /artifacts/{appId}/public/data/{collectionName}
+    const studentCol = collection(db, 'artifacts', appId, 'public', 'data', 'students');
+    const financeCol = collection(db, 'artifacts', appId, 'public', 'data', 'finance');
+
+    const unsubStudents = onSnapshot(studentCol, (snapshot) => {
+      setStudents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.error("Firestore Student Error:", err);
+    });
+
+    const unsubFinance = onSnapshot(financeCol, (snapshot) => {
+      setTransactionsData(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.error("Firestore Finance Error:", err);
+    });
+
+    return () => {
+      unsubStudents();
+      unsubFinance();
+    };
+  }, [user]);
+
+  const toggleLang = () => setLang(lang === 'ur' ? 'en' : 'ur');
+
+  const handleLogin = (selectedRole) => {
+    setRole(selectedRole);
+    setView(selectedRole === 'admin' ? 'admin' : 'student');
+  };
+
+  const handleAddStudent = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'students'), {
+        ...data,
+        studentId: `STU-${Math.floor(Math.random() * 10000)}`,
+        createdAt: serverTimestamp()
+      });
+      setShowModal(false);
+    } catch (err) {
+      console.error("Error adding student:", err);
+    }
+  };
+
+  const handleAddTransaction = async (e, type) => {
+    e.preventDefault();
+    if (!user) return;
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'finance'), {
+        ...data,
+        type,
+        date: new Date().toISOString().split('T')[0],
+        createdAt: serverTimestamp()
+      });
+      setShowModal(false);
+    } catch (err) {
+      console.error("Error adding transaction:", err);
+    }
+  };
+
+  // --- Components ---
+
+  const Header = () => (
+    <div className="bg-emerald-800 text-white p-6 text-center shadow-lg relative">
+      <button 
+        onClick={toggleLang}
+        className="absolute top-4 right-4 bg-white/20 p-2 rounded-full hover:bg-white/30 transition"
+      >
+        <Globe size={20} />
+      </button>
+      <p className="text-xl mb-2 font-serif">{t.bismillah}</p>
+      <h1 className="text-3xl font-bold mb-1">{t.title}</h1>
+      <p className="text-sm opacity-80">{t.address}</p>
+    </div>
+  );
+
+  const ProfileCard = ({ name, role, color, bio }) => (
+    <div 
+      className="bg-white p-6 rounded-2xl shadow-md border-t-4 hover:scale-105 transition cursor-pointer"
+      style={{ borderColor: color }}
+      onClick={() => setProfileModal({ name, role, bio })}
+    >
+      <div className="w-20 h-20 bg-gray-100 rounded-full mx-auto mb-4 flex items-center justify-center text-gray-400">
+        <UserCircle size={48} />
+      </div>
+      <h3 className="font-bold text-lg text-center">{name}</h3>
+      <p className="text-center text-sm text-gray-500">{role}</p>
+    </div>
+  );
+
+  const HomeView = () => (
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+        <ProfileCard name="Zair-e-Nigrani" role="Patron" color="#065f46" bio="Spiritual Guidance & Supervision" />
+        <ProfileCard name="Faizan Nazar" role="Administrator" color="#059669" bio="Overall Management & Strategy" />
+        <ProfileCard name="Moallim" role="Head Teacher" color="#10b981" bio="Academic Excellence & Discipline" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-2xl mx-auto">
+        <button 
+          onClick={() => handleLogin('student')}
+          className="flex flex-col items-center justify-center p-8 bg-white border-2 border-emerald-100 rounded-3xl hover:bg-emerald-50 transition shadow-sm group"
+        >
+          <div className="p-4 bg-emerald-100 rounded-2xl mb-4 group-hover:bg-emerald-200 transition">
+            <Users className="text-emerald-700" size={32} />
+          </div>
+          <span className="text-xl font-bold text-emerald-900">{t.studentLogin}</span>
+        </button>
+
+        <button 
+          onClick={() => handleLogin('admin')}
+          className="flex flex-col items-center justify-center p-8 bg-white border-2 border-emerald-100 rounded-3xl hover:bg-emerald-50 transition shadow-sm group"
+        >
+          <div className="p-4 bg-emerald-100 rounded-2xl mb-4 group-hover:bg-emerald-200 transition">
+            <Layout className="text-emerald-700" size={32} />
+          </div>
+          <span className="text-xl font-bold text-emerald-900">{t.adminLogin}</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  const AdminView = () => (
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="flex justify-between items-center mb-8 bg-white p-4 rounded-2xl shadow-sm">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Layout className="text-emerald-600" /> {t.dashboard} (Admin)
+        </h2>
+        <div className="flex gap-2">
+           <button onClick={() => setView('finance')} className="bg-blue-600 text-white px-4 py-2 rounded-xl flex items-center gap-2">
+            <Wallet size={18} /> {t.finance}
+          </button>
+          <button onClick={() => setShowModal('student')} className="bg-emerald-600 text-white px-4 py-2 rounded-xl flex items-center gap-2">
+            <Plus size={18} /> {t.addStudent}
+          </button>
+          <button onClick={() => {setRole(null); setView('home');}} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-emerald-500">
+          <p className="text-gray-500 text-sm uppercase">{t.students}</p>
+          <h3 className="text-3xl font-bold">{students.length}</h3>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-blue-500">
+          <p className="text-gray-500 text-sm uppercase">{t.income}</p>
+          <h3 className="text-3xl font-bold text-emerald-600">
+            {transactionsData.filter(i => i.type === 'income').reduce((acc, curr) => acc + Number(curr.amount || 0), 0)}
+          </h3>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border-l-4 border-red-500">
+          <p className="text-gray-500 text-sm uppercase">{t.expense}</p>
+          <h3 className="text-3xl font-bold text-red-600">
+            {transactionsData.filter(i => i.type === 'expense').reduce((acc, curr) => acc + Number(curr.amount || 0), 0)}
+          </h3>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="p-4">{t.name}</th>
+              <th className="p-4">ID</th>
+              <th className="p-4">{t.phone}</th>
+              <th className="p-4">{t.reports}</th>
+              <th className="p-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map(stu => (
+              <tr key={stu.id} className="border-b hover:bg-gray-50 transition">
+                <td className="p-4 font-medium">{stu.name}</td>
+                <td className="p-4 text-gray-500">{stu.studentId}</td>
+                <td className="p-4">{stu.phone}</td>
+                <td className="p-4">
+                  <button className="text-blue-600 flex items-center gap-1"><FileText size={16}/> Daily</button>
+                </td>
+                <td className="p-4 text-right flex justify-end gap-2">
+                  <button className="p-2 text-gray-400 hover:text-blue-600"><Edit2 size={18}/></button>
+                  <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', stu.id))} className="p-2 text-gray-400 hover:text-red-600"><Trash2 size={18}/></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const FinanceView = () => (
+    <div className="max-w-6xl mx-auto p-6">
+       <div className="flex justify-between items-center mb-8">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Wallet className="text-blue-600" /> {t.finance}
+        </h2>
+        <div className="flex gap-2">
+          <button onClick={() => setShowModal('income')} className="bg-emerald-600 text-white px-4 py-2 rounded-xl flex items-center gap-2">
+            <Plus size={18} /> {t.income}
+          </button>
+          <button onClick={() => setShowModal('expense')} className="bg-red-600 text-white px-4 py-2 rounded-xl flex items-center gap-2">
+            <Plus size={18} /> {t.expense}
+          </button>
+          <button onClick={() => setView('admin')} className="bg-gray-200 px-4 py-2 rounded-xl">Back</button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h3 className="font-bold mb-4 text-emerald-700 border-b pb-2">{t.income} (آمدن)</h3>
+          {transactionsData.filter(t => t.type === 'income').map(item => (
+            <div key={item.id} className="flex justify-between items-center p-3 border-b last:border-0">
+              <div>
+                <p className="font-bold">{item.donor}</p>
+                <p className="text-xs text-gray-500">{item.date}</p>
+              </div>
+              <span className="text-emerald-600 font-bold">+{item.amount}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h3 className="font-bold mb-4 text-red-700 border-b pb-2">{t.expense} (خرچ)</h3>
+          {transactionsData.filter(t => t.type === 'expense').map(item => (
+            <div key={item.id} className="flex justify-between items-center p-3 border-b last:border-0">
+              <div>
+                <p className="font-bold">{item.description}</p>
+                <p className="text-xs text-gray-500">{item.date}</p>
+              </div>
+              <span className="text-red-600 font-bold">-{item.amount}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const Modal = ({ title, children, onClose }) => (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95">
+        <div className="p-6 border-b flex justify-between items-center bg-emerald-50">
+          <h3 className="text-xl font-bold text-emerald-900">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-black">&times;</button>
+        </div>
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-emerald-800 font-medium">{t.loading}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen bg-gray-50 ${lang === 'ur' ? 'rtl' : 'ltr'} font-sans`}>
+      <Header />
+
+      <main className="pb-20">
+        {view === 'home' && <HomeView />}
+        {view === 'admin' && <AdminView />}
+        {view === 'finance' && <FinanceView />}
+        {view === 'student' && (
+          <div className="max-w-2xl mx-auto p-6 text-center py-20 bg-white m-6 rounded-3xl shadow-sm">
+            <BookOpen className="mx-auto text-emerald-600 mb-4" size={48} />
+            <h2 className="text-2xl font-bold mb-4">{t.studentLogin}</h2>
+            <p className="text-gray-500 mb-8">This portal is currently being initialized. Please contact admin for your Student ID.</p>
+            <button onClick={() => setView('home')} className="bg-emerald-600 text-white px-8 py-3 rounded-2xl">Return Home</button>
+          </div>
+        )}
+      </main>
+
+      <footer className="bg-white border-t p-6 text-center text-gray-500 text-sm mt-auto">
+        <p>{t.footer}</p>
+        <p className="mt-1 text-xs opacity-60">JAMIA MS v1.0.1</p>
+      </footer>
+
+      {/* --- Modals --- */}
+      {showModal === 'student' && (
+        <Modal title={t.addStudent} onClose={() => setShowModal(false)}>
+          <form onSubmit={handleAddStudent} className="space-y-4">
+            <input name="name" placeholder={t.name} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <input name="fatherName" placeholder={t.fatherName} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <div className="grid grid-cols-2 gap-4">
+              <input name="age" type="number" placeholder={t.age} className="p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" />
+              <input name="phone" placeholder={t.phone} className="p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            </div>
+            <textarea name="address" placeholder={t.addressLabel} className="w-full p-3 bg-gray-100 rounded-xl border-none h-24 focus:ring-2 focus:ring-emerald-500" />
+            <button type="submit" className="w-full bg-emerald-600 text-white p-4 rounded-xl font-bold hover:bg-emerald-700 transition">{t.save}</button>
+          </form>
+        </Modal>
+      )}
+
+      {showModal === 'income' && (
+        <Modal title={t.income} onClose={() => setShowModal(false)}>
+          <form onSubmit={(e) => handleAddTransaction(e, 'income')} className="space-y-4">
+            <input name="donor" placeholder={t.donor} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <input name="amount" type="number" placeholder={t.amount} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <button type="submit" className="w-full bg-emerald-600 text-white p-4 rounded-xl font-bold hover:bg-emerald-700 transition">{t.save}</button>
+          </form>
+        </Modal>
+      )}
+
+      {showModal === 'expense' && (
+        <Modal title={t.expense} onClose={() => setShowModal(false)}>
+          <form onSubmit={(e) => handleAddTransaction(e, 'expense')} className="space-y-4">
+            <input name="description" placeholder={t.description} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <input name="amount" type="number" placeholder={t.amount} className="w-full p-3 bg-gray-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500" required />
+            <button type="submit" className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition">{t.save}</button>
+          </form>
+        </Modal>
+      )}
+
+      {profileModal && (
+        <Modal title={profileModal.role} onClose={() => setProfileModal(null)}>
+          <div className="text-center">
+            <div className="w-24 h-24 bg-emerald-100 rounded-full mx-auto mb-4 flex items-center justify-center text-emerald-600">
+              <UserCircle size={64} />
+            </div>
+            <h2 className="text-2xl font-bold">{profileModal.name}</h2>
+            <p className="text-emerald-600 font-medium mb-4">{profileModal.role}</p>
+            <p className="text-gray-600 leading-relaxed">{profileModal.bio}</p>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+export default App;
